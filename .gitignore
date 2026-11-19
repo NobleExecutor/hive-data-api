@@ -1,0 +1,19 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Données : seules les séries fictives sont versionnées
+data/*
+!data/series.sample.json
+*.db
+*.db-shm
+*.db-wal
+
+# Dépendances, logs, système
+node_modules/
+logs/
+*.log
+npm-debug.log*
+coverage/
+.DS_Store
