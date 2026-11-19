@@ -38,7 +38,8 @@ L'API écoute sur `http://127.0.0.1:3000`. Au démarrage, elle s'arrête avec un
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PORT` | `3000` | Port d'écoute |
-| `HOST` | `127.0.0.1` | Adresse d'écoute (seul Nginx est exposé en production) |
+| `HOST` | `127.0.0.1` | Adresse d'écoute (en production : `172.17.0.1`, joignable seulement par le VPS et ses conteneurs) |
+| `TRUST_PROXY` | `loopback` | Proxys autorisés à fournir l'IP du client (`X-Forwarded-For`) ; en production : `loopback, uniquelocal` |
 | `API_KEY` | — | Clé partagée avec l'application PHP, 32 caractères minimum |
 | `TZ` | `Europe/Paris` | Fuseau des créneaux 08:00 / 20:00 |
 | `SERIES_PATH` | `data/series.sample.json` | Pool de séries de référence |
@@ -137,17 +138,61 @@ Format : `{ "error": { "code": "...", "message": "..." } }`
 - Validation stricte des entrées (zod), champs inconnus refusés, corps limité à 10 Ko.
 - Requêtes SQL préparées uniquement.
 - Aucune trace interne dans les réponses ; ni GPS ni clé dans les logs.
-- En production, l'API écoute sur `127.0.0.1` derrière Nginx (HTTPS).
+- En production, l'API n'est pas exposée sur Internet : elle écoute sur l'interface Docker du VPS, derrière Caddy (HTTPS).
+- L'IP du client n'est lue dans `X-Forwarded-For` que si la requête vient d'un proxy de confiance (`TRUST_PROXY`) : impossible de contourner la limite de requêtes en falsifiant cet en-tête.
 
 ## Déploiement
 
-Sur le VPS (Node LTS, PM2, Nginx) :
+Sur le VPS : l'API tourne sur l'hôte avec PM2 (Node LTS), derrière **Caddy dans Docker**, qui gère le HTTPS.
 
 ```bash
 ./deploy.sh
 ```
 
 Le script fait `git pull`, `npm ci --omit=dev` puis recharge l'API avec PM2 (`ecosystem.config.cjs`). Le `.env` et le fichier de séries réel (`data/series.json`, référencé par `SERIES_PATH`) sont copiés à la main sur le serveur et ne passent jamais par Git.
+
+### Première mise en place derrière Caddy (Docker)
+
+Dans le conteneur Caddy, `127.0.0.1` désigne le conteneur lui-même : l'API écoute donc sur l'adresse de l'hôte sur le réseau Docker (`ip -4 addr show docker0`, en général `172.17.0.1`).
+
+1. **DNS** : un enregistrement A `api.mondomaine.fr` vers l'IP du VPS.
+2. **`.env`** :
+   ```env
+   HOST=172.17.0.1
+   PORT=3000
+   TRUST_PROXY=loopback, uniquelocal
+   SERIES_PATH=data/series.json
+   ```
+   Ne pas utiliser `HOST=0.0.0.0` : l'API serait exposée sur Internet si le pare-feu le permet.
+3. **API** : `./deploy.sh`, puis une seule fois `pm2 startup` (lancer la commande `sudo` affichée) pour un redémarrage automatique au boot. Vérifier : `curl http://172.17.0.1:3000/api/v1/health`.
+4. **Caddy** : dans le `docker-compose.yml`, ajouter au service Caddy :
+   ```yaml
+       extra_hosts:
+         - "host.docker.internal:host-gateway"
+   ```
+   puis `docker compose up -d caddy`. Ajouter au Caddyfile :
+   ```caddy
+   api.mondomaine.fr {
+   	reverse_proxy host.docker.internal:3000
+   }
+   ```
+   Valider puis recharger (remplacer `caddy` par le nom du conteneur, et le chemin par celui où le Caddyfile est monté, voir `docker inspect caddy`) :
+   ```bash
+   docker exec caddy caddy validate --config /etc/caddy/Caddyfile
+   docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+   ```
+   Caddy obtient le certificat HTTPS tout seul.
+5. **Pare-feu** : si `ufw` est actif, autoriser les conteneurs (et eux seuls) à joindre l'API :
+   ```bash
+   sudo ufw allow from 172.16.0.0/12 to 172.17.0.1 port 3000 proto tcp
+   ```
+6. **Tests** :
+   ```bash
+   docker exec caddy wget -qO- http://host.docker.internal:3000/api/v1/health
+   curl https://api.mondomaine.fr/api/v1/health
+   ```
+
+Après un redémarrage du VPS, vérifier `pm2 status` : l'API ne peut démarrer qu'une fois Docker lancé (`restart_delay` laisse le temps à `docker0` d'apparaître).
 
 ## Structure
 

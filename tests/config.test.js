@@ -37,6 +37,14 @@ describe('config', () => {
     expect(() => loadConfig({ API_KEY: KEY, TZ: 'Mars/Olympus' })).toThrow(/TZ/);
   });
 
+  it('lit TRUST_PROXY (loopback par défaut) et refuse une valeur invalide', () => {
+    expect(loadConfig({ API_KEY: KEY }).trustProxy).toBe('loopback');
+    expect(loadConfig({ API_KEY: KEY, TRUST_PROXY: 'loopback, uniquelocal' }).trustProxy)
+      .toBe('loopback, uniquelocal');
+    expect(loadConfig({ API_KEY: KEY, TRUST_PROXY: '172.16.0.0/12' }).trustProxy).toBe('172.16.0.0/12');
+    expect(() => loadConfig({ API_KEY: KEY, TRUST_PROXY: 'caddy' })).toThrow(/TRUST_PROXY/);
+  });
+
   it('accepte les chemins absolus', () => {
     expect(loadConfig({ API_KEY: KEY, DB_PATH: '/tmp/x.db' }).dbPath).toBe('/tmp/x.db');
   });

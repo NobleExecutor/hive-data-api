@@ -10,6 +10,9 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       max_memory_restart: '200M',
+      // Au boot, l'interface docker0 (HOST=172.17.0.1) peut ne pas encore exister :
+      // on espace les relances pour laisser Docker démarrer avant que PM2 n'abandonne.
+      restart_delay: 5000,
       env: {
         NODE_ENV: 'production',
       },

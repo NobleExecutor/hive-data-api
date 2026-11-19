@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import express from 'express';
 import { IANAZone } from 'luxon';
 
 /** Racine du projet : les chemins relatifs du .env sont résolus depuis ici. */
@@ -27,6 +28,23 @@ function readInt(env, name, defaultValue, min, max, problems) {
     problems.push(`${name} doit être compris entre ${min} et ${max} (reçu : ${value})`);
   }
   return value;
+}
+
+/**
+ * Proxys de confiance (réglage `trust proxy` d'Express) : liste de mots-clés
+ * (loopback, linklocal, uniquelocal) ou d'adresses / plages CIDR, séparés par des virgules.
+ * Seules les requêtes venant de ces adresses peuvent fournir l'IP du client via X-Forwarded-For.
+ */
+function readTrustProxy(env, problems) {
+  const raw = (env.TRUST_PROXY ?? '').trim() || 'loopback';
+  try {
+    express().set('trust proxy', raw); // Express compile la liste ici et lève une erreur si elle est invalide
+  } catch {
+    problems.push(
+      `TRUST_PROXY est invalide (reçu : « ${raw} » ; attendu : loopback, uniquelocal ou des adresses/CIDR séparés par des virgules)`,
+    );
+  }
+  return raw;
 }
 
 function readPath(env, name, defaultValue) {
@@ -58,6 +76,7 @@ export function loadConfig(env = process.env) {
   const config = {
     port: readInt(env, 'PORT', 3000, 1, 65535, problems),
     host: env.HOST || '127.0.0.1',
+    trustProxy: readTrustProxy(env, problems),
     apiKey,
     timezone,
     seriesPath: readPath(env, 'SERIES_PATH', 'data/series.sample.json'),

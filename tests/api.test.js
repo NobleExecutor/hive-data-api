@@ -1,3 +1,4 @@
+import http from 'node:http';
 import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -258,6 +259,51 @@ describe('API', () => {
       await api.get('/hives');
       await api.get('/hives');
       expect((await api.get('/hives')).status).toBe(429);
+    });
+  });
+
+  describe('reverse proxy (X-Forwarded-For)', () => {
+    /** Serveur dont toutes les connexions semblent venir de `remoteAddress` (ex. Caddy dans Docker). */
+    function from(app, remoteAddress) {
+      return http.createServer((req, res) => {
+        Object.defineProperty(req.socket, 'remoteAddress', { value: remoteAddress, configurable: true });
+        app(req, res);
+      });
+    }
+
+    function makeApp(trustProxy) {
+      return createApp({
+        apiKey: API_KEY,
+        db: openDatabase(':memory:'),
+        pool,
+        zone: ZONE,
+        rateLimits: { global: 2, write: 100 },
+        ...(trustProxy && { trustProxy }),
+      });
+    }
+
+    const health = (server, clientIp) => request(server).get('/api/v1/health').set('X-Forwarded-For', clientIp);
+
+    it('proxy Docker de confiance : un quota par client réel', async () => {
+      const server = from(makeApp('loopback, uniquelocal'), '172.18.0.5');
+      await health(server, '203.0.113.1');
+      await health(server, '203.0.113.1');
+      expect((await health(server, '203.0.113.1')).status).toBe(429);
+      expect((await health(server, '203.0.113.2')).status).toBe(200);
+    });
+
+    it('par défaut (loopback), un proxy Docker n\'est pas cru : quota partagé', async () => {
+      const server = from(makeApp(), '172.18.0.5');
+      await health(server, '203.0.113.1');
+      await health(server, '203.0.113.2');
+      expect((await health(server, '203.0.113.3')).status).toBe(429);
+    });
+
+    it('un client public ne peut pas falsifier son IP', async () => {
+      const server = from(makeApp('loopback, uniquelocal'), '198.51.100.7');
+      await health(server, '203.0.113.1');
+      await health(server, '203.0.113.2');
+      expect((await health(server, '203.0.113.3')).status).toBe(429);
     });
   });
 });

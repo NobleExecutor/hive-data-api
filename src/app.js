@@ -24,6 +24,7 @@ export const API_PREFIX = '/api/v1';
  * @param {string} [options.zone]
  * @param {() => DateTime} [options.clock]  horloge injectable (tests)
  * @param {object} [options.rateLimits]     { windowMs, global, write }
+ * @param {string} [options.trustProxy]     proxys autorisés à fournir l'IP client (X-Forwarded-For)
  * @param {(line: string) => void} [options.log]  journal d'accès (sans corps ni query)
  */
 export function createApp({
@@ -35,6 +36,7 @@ export function createApp({
   zone = DEFAULT_ZONE,
   clock = () => DateTime.now(),
   rateLimits = {},
+  trustProxy = 'loopback',
   log = null,
 }) {
   if (!apiKey) throw new Error('createApp : apiKey est requise.');
@@ -44,7 +46,9 @@ export function createApp({
   const { globalLimiter, writeLimiter } = createRateLimiters(rateLimits);
 
   const app = express();
-  app.set('trust proxy', 'loopback'); // Nginx en local : l'IP du client vient de X-Forwarded-For
+  // Reverse proxy (Caddy) : l'IP du client vient de X-Forwarded-For, mais seulement si
+  // la requête arrive d'un proxy de confiance (sinon un client pourrait falsifier son IP).
+  app.set('trust proxy', trustProxy);
   app.use(helmet());
 
   if (log) {

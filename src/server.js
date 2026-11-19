@@ -30,6 +30,7 @@ const app = createApp({
   maxHives: config.maxHives,
   historyDays: config.historyDays,
   zone: config.timezone,
+  trustProxy: config.trustProxy,
   log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
 });
 
